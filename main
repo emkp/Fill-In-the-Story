@@ -1,0 +1,502 @@
+'''
+File name: Fill-in-the-Story
+Author:Emily Peterson
+Date created: 3/28/19
+Python Version: 3.7
+
+This program runs a tkinter GUI that allows users to do two things:
+- turn stories into "madlib"-style fill-in-the-blank passages with POS tags for each blank
+- provide a "madlib"-style text file and fill it in with words by POS
+
+Strategy for building mutliple "windows" in a tkinter GUI was derived from hkinsley's video at:
+https://www.youtube.com/watch?v=jBUpjijYtCk
+'''
+
+#import modules for madlibizing
+from nltk import sent_tokenize, word_tokenize, pos_tag
+from re import match
+
+#import modules for GUI
+import tkinter as tk
+from tkinter import ttk
+
+#define a function to turn a story into a madlib
+#input: a story in the form of a single text string
+#output: the same story but with words of certain POSs replaced by blanks and POS labels
+def madlibize(story):
+
+    #tokenize the story: first into sentences
+    sent_story = sent_tokenize(story)
+    
+    #tokenize each sentence into words
+    words_story = [word_tokenize(sentence) for sentence in sent_story]
+    
+    #assign pos tags to each word in each sentence
+    pos_story = [pos_tag(word) for word in words_story]
+
+    #define which parts of speech will be replaced
+    tags_to_replace = ['JJ', 'NN']
+    pos_tags_dictionary = {'JJ':'adjective', 'NN':'noun', 'NNS':'plural noun'}
+    punctuation_tags = ['.', ',', "''", '""', '!', '?']
+
+    #initialize a new list that will become the madlib
+    madlib_list = []
+
+    #initialize a list of words to replace
+    words_to_replace = []
+
+    #initialize a list of words that have been replaced
+    words_already_replaced = []
+
+    #initialize a variable to store the number of the word
+    word_number = 0
+
+    #for each sentence in the story
+    for sent in pos_story:
+        
+        #for each tagged word in the sentence
+        for tagged_word in sent:
+            word = tagged_word[0]
+            tag = tagged_word[1]
+            
+            #if the tag indicates a type of word to be replaced
+            if tag in tags_to_replace:
+
+                #check whether this word has been replaced before
+                if word in words_already_replaced:
+
+                    #if it has already been replaced, refer back to first blank
+                    madlib_list.append('___(same as word ' + str(words_already_replaced.index(word) + 1) + ')')
+
+                #if the word hasn't been replaced before:
+                else:
+
+                    #increment the word number
+                    word_number += 1
+
+                    #put blank number into (#)___ string that will replace the word
+                    labeled_blank = '(' + str(word_number) + ', ' + pos_tags_dictionary[tag] + ')___'
+
+                    #replace the word with a labeled blank
+                    madlib_list.append(labeled_blank)
+
+                    #add the word to the list of words we've replaced so far
+                    words_already_replaced.append(word)
+
+            #take advantage of punctuation tags to merge punctuation with preceding word; helps format output
+            elif tag in punctuation_tags:
+                madlib_list[-1] += word
+
+            #add non-replaced words to the madlib too
+            else:
+                madlib_list.append(word)
+                
+    #join madlib_list into a single string
+    madlib = ' '.join(word for word in madlib_list)
+
+    #return the madlib
+    return madlib
+
+#define a function to fill in a madlib that has fill-in-the-blank spaces
+def fill_in_madlib(file_path, POS_and_user_words):
+    
+    #read in the named madlib file
+    madlib_file = open(file_path.strip(), 'r')
+    madlib = madlib_file.read()
+    madlib_file.close()
+    
+    #now to fill in the madlib:
+
+    #split the madlib into a list of words separated by spaces
+    split_madlib = madlib.split(' ')
+
+    #make a copy of split_madlib to work ("w") from so we don't ruin the original
+    split_madlib_w = list.copy(split_madlib)
+
+    #initialize the new madlib, first as a list
+    filled_in_madlib = []
+
+    #initialize a list for keeping track of replacement words
+    replacements_list = []
+
+    #for each list item (word) in the working copy of the madlib,
+    for i in range(len(split_madlib_w)):
+        word = split_madlib_w[i]
+
+        #check whether the item is a labeled blank
+        #labeled blanks take the form of ['(#', 'POS)___']
+        #if current item looks like 'POS)___'...
+        if match(r".+\)___", word):
+
+            #get the POS that should fill the blank; it is the first part when word is split at the ')'      
+            part_of_speech = word.split(')')[0]
+
+            #get the correct list from POS_and_user_words
+            user_words_list_i = 0
+            for lst in POS_and_user_words:
+                if lst[0] == part_of_speech:
+                    user_words_list_i = POS_and_user_words.index(lst)
+
+            #if there are user words of this POS left to be inserted
+            if len(POS_and_user_words[user_words_list_i]) > 1:
+
+                #then replace the item with user input:
+
+                #take the next available user word from the appropriate POS_and_user_words list of available user words
+                replacement = POS_and_user_words[user_words_list_i][1]
+
+                #remove the word we used from the list of available user words
+                POS_and_user_words[user_words_list_i].remove(replacement)
+
+                #append the user's word to the filled_in_madlib, replacing the most recently appended item
+                #which will have been the label ['(#']
+                filled_in_madlib[-1] = replacement
+
+                #keep track of the user's replacements in the replacements list
+                replacements_list.append(replacement)
+
+        #check whether the item is a blank referring back to an earlier blank
+        #blanks referring to earlier blanks look like '___(same' and are followed by ['as', 'word', '#']
+        elif match(r"^_", word):
+
+            #get the string that tells which word this blank refers back to; it is 3 list items ahead
+            reference_word_i = int(split_madlib_w[i+3].split(')')[0])
+
+            #get the corresponding word from the replacements list
+            replacement = replacements_list[reference_word_i - 1]
+
+            #append the replacement to the filled_in_madlib
+            filled_in_madlib.append(replacement)
+
+            #to make sure the words ['as', 'word', '#'], which follow this one, don't show up in the final product,
+            #replace them now so they will be skipped by this function in the following 'elif' clause
+            split_madlib_w[i + 1] = 'SKIP1'
+            split_madlib_w[i + 2] = 'SKIP2'
+            split_madlib_w[i + 3] = 'SKIP3'
+
+        #skip items that look like 'SKIP'
+        elif match(r"SKIP.", word):
+            pass
+
+        #if the item fills none of these criteria, it is a normal word and should be appended
+        else:
+            filled_in_madlib.append(word)
+
+    #join the list items of filled_in_madlib together to produce the final product, a string
+    filled_in_madlib_string = ' '.join(filled_in_madlib)
+    return filled_in_madlib_string
+
+#define function to find the blanks in a madlib
+#and ask the user for the right number and type of words
+def what_words_needed(madlib):
+
+    #split the madlib into a list of words separated by spaces
+    split_madlib = madlib.split(' ')
+
+    #make a copy of split_madlib to work from so we don't ruin the original
+    split_madlib_w = list.copy(split_madlib)    
+    
+    #initialize a dictionary of POSs to keep track of how many to ask for
+    POS_dict = {'adjective':0, 'noun':0}
+    
+    #find the numbered blanks in the madlib;
+    #they take the form of ['(#', 'POS)___']
+    for i in split_madlib_w:
+        if match(r".+\)___", i):
+            
+            #separate the POS from the ')___'
+            POS = i.split(")")[0]
+            
+            #if the POS is in our dictionary...
+            if POS in POS_dict:
+                
+                #increase the count for that POS by 1
+                POS_dict[POS] += 1
+                
+            #if the POS is not in the dictionary...
+            else:
+                
+                #add it
+                POS_dict[POS] = 1
+                
+    #return the dictionary; it will be used in forming user prompts
+    return(POS_dict)
+
+#build a GUI using TKinter
+
+#initialize some values for formatting
+LARGE_FONT = ("Verdana", 12)
+MEDIUM_FONT = ("Verdana", 10)
+
+#The Fill_In_the_Story class inherits from tk.Tk
+class Fill_In_the_Story(tk.Tk):
+    
+    #initialize madlibgame class
+    def __init__(self, *args, **kwargs):
+        
+        #initialize tkinter
+        tk.Tk.__init__(self, *args, **kwargs)
+        
+        #add a container
+        container = tk.Frame(self)
+        
+        #add the container to the GUI using pack()
+        container.pack(side='top', fill='both', expand=True)
+        
+        #format the container
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
+        
+        #create four frames; a start page and three activity pages
+        self.frames = {}
+        for F in (StartPage, PageOne, PageTwo): 
+            frame = F(container, self)
+            self.frames[F] = frame
+            frame.grid(row=0, column=0, sticky='nsew')
+
+        #start off showing the Start Page
+        self.show_frame(StartPage)
+        
+    #define a function to show the desired frame
+    def show_frame(self, cont):
+        
+        frame = self.frames[cont]
+        frame.tkraise()
+
+#the Start Page is a class inheriting from tk.Frame
+class StartPage(tk.Frame):
+    
+    #initialize the Start Page class
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        
+        #add a heading
+        heading = tk.Label(self, text="Welcome to Fill-in-the-Story", font=LARGE_FONT)
+        heading.place(relx=0.5, rely=0.05, anchor='n')
+        
+        #add a subheading
+        subheading = tk.Label(self, text="Please choose an activity", font=MEDIUM_FONT)
+        subheading.place(relx=0.5, rely=0.1, anchor='n')
+        
+        #add buttons to navigate to each activity page and instructions under each button
+        button1 = ttk.Button(self, text="Generate a Fill-in-the-blank Story",
+                            command=lambda: controller.show_frame(PageOne))
+        button1.place(relx=0.5, rely=.25, anchor='n')
+        
+        instructions1 = "This activity allows you to turn a story into one with blanks where nouns and adjectives used to be."
+        instr1 = tk.Label(self, text=instructions1, font=MEDIUM_FONT)
+        instr1.place(relx=0.5, rely=0.35, anchor='n')
+        
+        button2 = ttk.Button(self, text="Fill in a Story",
+                           command=lambda: controller.show_frame(PageTwo))
+        button2.place(relx=0.5, rely=.5, anchor='n')
+        
+        instructions2 = "This activity allows you to fill in blanks to create a new story. You will need to provide the path to a text file containing a story."
+        instr2 = tk.Label(self, text=instructions2, font=MEDIUM_FONT)
+        instr2.place(relx=0.5, rely=0.6, anchor='n')
+
+#Page One is also a class inheriting from tk.Frame
+class PageOne(tk.Frame):
+    
+    #define a function to make use of the general function madlibize() within the GUI
+    def madlibizer(self, story):
+
+        #assign the madlibized story to a variable OUTPUT_TEXT
+        OUTPUT_TEXT = madlibize(story)
+        
+        #add a label for the output text
+        output_label = tk.Label(self, text="Your fill-in-the-blank story:", font=MEDIUM_FONT)
+        output_label.grid(row=10, column=0, sticky='W', padx=10)
+        
+        #add the output text, which is the madlibized story
+        output_text = tk.Label(self, text=OUTPUT_TEXT,
+                               font=MEDIUM_FONT, wraplength=600)
+        output_text.grid(row=12, column=0, sticky='W', padx=10)
+    
+    #define a function to save madlibized text to a text file
+    def save_madlib(self, story):
+        #write to a file called "new_fitstory.txt"
+        new_file = open("new_fitstory.txt", "w")
+        new_file.write(madlibize(story))
+        new_file.close()
+        
+        #display a label telling the user the madlib has been saved
+        saved_label = tk.Label(self, text="Saved!", font=MEDIUM_FONT)
+        saved_label.grid(row=17, column=3)
+    
+    #initialize Page One
+    def __init__(self, parent, controller):        
+        tk.Frame.__init__(self, parent)
+        
+        #add a heading
+        heading = tk.Label(self, text="Generate a Fill-in-the-Blank Story", font=LARGE_FONT)
+        #heading.place(relx=0.5, rely=0.05, anchor='n')
+        heading.grid(row=0, column=0, rowspan=2, padx=10, sticky="W")
+        
+        #add a 'back' button
+        button1 = ttk.Button(self, text="Back",
+                            command=lambda: controller.show_frame(StartPage))
+        #button1.place(relx=0.8, rely=0.05, anchor='n')
+        button1.grid(row=0, column=3, padx=10)
+        
+        #ask the user for a story to madlibize
+        entry_label = tk.Label(self, text="Paste your story here:", font=MEDIUM_FONT)
+        entry_label.grid(row=2, column=0, rowspan=2, padx=10, sticky="W")
+        
+        #add the text box where the user can submit a story to be madlibized
+        story_entry = tk.Text(self)
+        story_entry.grid(row=4, column=0, rowspan=4, columnspan=2, padx=5)
+        
+        #add a submit button which calls the madlibizer function above 
+        submit_button = ttk.Button(self, text="Generate!",
+                                 command= lambda: self.madlibizer(story_entry.get("1.0", "end")))
+        submit_button.grid(row=4, column=3, padx=10)
+        
+        #add a save button which calls the save_madlib function above
+        save_button=ttk.Button(self, text="Save to file 'new_fitstory.txt'",
+                             command=lambda: self.save_madlib(story_entry.get("1.0", "end")))
+        save_button.grid(row=15, column=3, padx=10)  
+        
+#Page Two is also a class inheriting from tk.Frame
+class PageTwo(tk.Frame):
+    
+    #define a function to fill in a madlib given a list of POSs, how many words per POS, the user's words, and the madlib path
+    def fill_in(self, POS_list, how_many_per_POS, user_words, madlib_path):
+        
+        #turn the string of user words into a list by splitting at commas
+        user_words_list = user_words.split(',')
+        
+        #initialize a list #initialize a list that will look like
+        #[[adjective, userword1, userword2, ...], [noun, userword3, userword 4, ...]]
+        POS_and_user_words = []
+        
+        #for each POS,
+        for POS in POS_list:
+            
+            #turn it into a list item
+            this_POS = [POS]
+            
+            #find how many words belong to this POS by referencing the how_many_per_P
+            how_many = how_many_per_POS[POS_list.index(POS)]
+            
+            #while there are words left that belong to this POS,
+            while how_many > 0:
+                
+                #add the next to the same list as the POS
+                this_POS.append(user_words_list[0])
+                
+                #remove that word from the user words left to handle
+                user_words_list.pop(0)
+                
+                #we now have one less word to add to this POS
+                how_many -= 1
+                
+            #add this POS and its words to the list of lists of POSs and their words
+            #[[adjective, userword1, userword2, ...], [noun, userword3, userword 4, ...]]
+            POS_and_user_words.append(this_POS)
+        
+        #call fill_in_madlib on this list of POSs and user words to fill in the madlib at madlib_path
+        filled_in_madlib = fill_in_madlib(madlib_path, POS_and_user_words)
+        print("filled in madlib is", filled_in_madlib)
+        
+        #add a label for the output text
+        output_label = tk.Label(self, text="Your filled-in story:", font=MEDIUM_FONT)
+        output_label.grid(row=7, column=0, sticky='W', padx=10)
+        
+        #add the output text, which is the madlibized story
+        output_text = tk.Label(self, text=filled_in_madlib, font=MEDIUM_FONT, wraplength=600, width=100, height=15)
+        output_text.grid(row=8, column=0, rowspan=3, columnspan=2, sticky='W', padx=10)
+            
+    #define a function to read in a text file of a madlib and ask the user for words
+    def get_user_words(self, madlib_path):
+
+        #read in the madlib text file
+        madlib_file = open(madlib_path.strip(), "r")
+        madlib_text = madlib_file.read()
+        madlib_file.close()
+        
+        #get a dictionary of what words are needed
+        #i.e. {adjective: 4, noun: 6}
+        POS_dict = what_words_needed(madlib_text)
+
+        #form a user prompt from the dictionary of words needed
+        #initialize a list that will look like [[adjective], [noun]]
+        POS_list = []
+        
+        #initialize a list to extract and use the values from POS_dict
+        how_many_per_POS = []
+        
+        #initialize a user prompt that we will add to
+        user_prompt = "Please enter: "
+        
+        #for each POS in the list of needed words,
+        for POS in POS_dict:
+            
+            #add the number of this POS needed to the how_many_per_POS list
+            how_many = POS_dict[POS]
+            how_many_per_POS.append(how_many)
+            
+            #add this POS and number to the user prompt
+            user_prompt += "\n" + str(how_many) + ' ' + POS + "s,"
+            
+            #start building the POS_list by adding in POSs from the POS_dict
+            POS_list.append(POS)
+        
+        #finish off the user prompt
+        user_prompt += "\nseparated by commas."
+        
+        #if the file that was read has no fill-in-the-blank spaces, don't proceed
+        if sum(how_many_per_POS) == 0:
+            user_prompt = "There are no fill-in-the-blank spaces in this story."
+            
+        #if there is at least one fill-in-the-blank space, print the user prompt
+        else:
+            
+            #print the user prompt
+            ask_for_words = tk.Label(self, text=user_prompt, font=MEDIUM_FONT)
+            ask_for_words.grid(row=3, column=0, rowspan=2, columnspan=2, sticky='W', padx=10)
+            
+            #accept user input via a text box
+            user_words_entry = tk.Text(self, width=100, height=5)
+            user_words_entry.grid(row=5, column=0, rowspan=2, columnspan=2, sticky='w', padx=10)
+            
+            #add a submission button for the user words
+            #this button will call the fill_in function above
+            enter_words_button = ttk.Button(self, text="Submit",
+                                          command=lambda: self.fill_in(POS_list, how_many_per_POS,
+                                                                       user_words_entry.get("1.0", "end"), madlib_path))
+            enter_words_button.grid(row=5, column=3, padx=10)
+        
+    #initalize Page Two
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        
+        self.columnconfigure(0, pad=10)
+        
+        #add a heading
+        heading = tk.Label(self, text="Fill In a Story", font=LARGE_FONT)
+        heading.grid(row=0, column=0, columnspan=2, padx=5, sticky="W")
+        
+        #add a 'back' button
+        button1 = ttk.Button(self, text="Back",
+                            command=lambda: controller.show_frame(StartPage))
+        button1.grid(row=0, column=3, padx=5)
+
+        #ask the user for a madlib to fill in
+        entry_label = tk.Label(self, text="Paste the text file path here:", font=MEDIUM_FONT)
+        entry_label.grid(row=1, column=0, columnspan=2, sticky='W')
+        
+        #add a text box for entry of the text file path
+        path = tk.Text(self, width=100, height=5)
+        path.grid(row=2, column=0, columnspan=2, padx=10)
+        
+        #add a submit button which calls the user_fill_in_madlib function above
+        submit_button = ttk.Button(self, text="Submit",
+                                 command= lambda: self.get_user_words(path.get("1.0", "end")))
+        submit_button.grid(row=2, column=3)
+
+#implement the Madlib Game App!
+fillinthestory = Fill_In_the_Story()
+fillinthestory.mainloop()
+
+#end of program
